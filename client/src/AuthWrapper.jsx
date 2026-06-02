@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import App from './App.jsx';
 import Login from './Login.jsx';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 function AuthWrapper() {
   const [user, setUser] = useState(null);
