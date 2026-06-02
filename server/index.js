@@ -10,6 +10,10 @@ const authConfig = require('./auth-config');
 const { ensureTeamsFile, teamExists, createTeam, verifyTeam, sanitizeTeamName, getTeamDataFile } = require('./teams');
 
 const app = express();
+
+// Trust proxy - required for secure cookies on Render/Heroku
+app.set('trust proxy', 1);
+
 const PORT = process.env.PORT || 3001;
 const DATA_FILE = path.join(__dirname, '../data/pairs-history.json');
 
@@ -35,11 +39,13 @@ app.use(session({
   secret: authConfig.sessionSecret,
   resave: false,
   saveUninitialized: false,
+  proxy: true, // Required when behind Render's proxy
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax'
+    sameSite: 'lax', // Use lax for same-site requests
+    path: '/'
   }
 }));
 
