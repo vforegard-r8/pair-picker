@@ -126,17 +126,19 @@ function smartPair(people, history) {
 }
 
 // Authentication Routes
-const { verifySimpleAuth } = require('./auth');
 
 // Multi-team login or create
 app.post('/auth/team-login', async (req, res) => {
+  console.log('[AUTH] Team login attempt:', { teamName: req.body.teamName, createNew: req.body.createNew });
   const { teamName, password, createNew } = req.body;
 
   if (!authConfig.multiTeam.enabled) {
+    console.log('[AUTH] Multi-team disabled');
     return res.status(400).json({ error: 'Multi-team mode is disabled.' });
   }
 
   if (!teamName || !password) {
+    console.log('[AUTH] Missing credentials');
     return res.status(400).json({ error: 'Team name and password are required' });
   }
 
@@ -168,8 +170,10 @@ app.post('/auth/team-login', async (req, res) => {
 
     req.login(user, (err) => {
       if (err) {
+        console.error('[AUTH] Login error:', err);
         return res.status(500).json({ error: 'Login failed' });
       }
+      console.log('[AUTH] Team created and logged in:', result.team);
       res.json({ success: true, user, created: true });
     });
   }
@@ -200,46 +204,6 @@ app.post('/auth/team-login', async (req, res) => {
   }
 });
 
-// Simple username/password login (legacy single-team mode)
-app.post('/auth/login', (req, res) => {
-  const { username, password } = req.body;
-
-  if (!authConfig.simpleAuth.enabled) {
-    return res.status(400).json({ error: 'Simple auth is disabled. Use team login.' });
-  }
-
-  if (verifySimpleAuth(username, password)) {
-    const user = {
-      id: '1',
-      username: username,
-      email: `${username}@rise8.us`,
-      name: username
-    };
-
-    req.login(user, (err) => {
-      if (err) {
-        return res.status(500).json({ error: 'Login failed' });
-      }
-      res.json({ success: true, user });
-    });
-  } else {
-    res.status(401).json({ error: 'Invalid username or password' });
-  }
-});
-
-// Google OAuth routes (only if OAuth is enabled)
-if (!authConfig.simpleAuth.enabled) {
-  app.get('/auth/google',
-    passport.authenticate('google', { scope: ['profile', 'email'] })
-  );
-
-  app.get('/auth/google/callback',
-    passport.authenticate('google', { failureRedirect: '/login-failed' }),
-    (req, res) => {
-      res.redirect(process.env.CLIENT_URL || 'http://localhost:3000');
-    }
-  );
-}
 
 app.get('/auth/logout', (req, res) => {
   req.logout((err) => {
@@ -251,16 +215,18 @@ app.get('/auth/logout', (req, res) => {
 });
 
 app.get('/auth/user', (req, res) => {
+  console.log('[AUTH] Check user, authenticated:', req.isAuthenticated(), 'session:', !!req.session);
   if (req.isAuthenticated()) {
+    console.log('[AUTH] User:', req.user);
     res.json({ user: req.user });
   } else {
+    console.log('[AUTH] No user logged in');
     res.json({ user: null });
   }
 });
 
 app.get('/auth/config', (req, res) => {
   res.json({
-    simpleAuthEnabled: authConfig.simpleAuth.enabled,
     multiTeamEnabled: authConfig.multiTeam.enabled
   });
 });
