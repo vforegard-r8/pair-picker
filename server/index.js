@@ -45,11 +45,15 @@ app.use(passport.initialize());
 app.use(passport.session());
 setupPassport();
 
-// Ensure data file exists
+// Ensure data directory and file exist
 async function ensureDataFile(filePath = DATA_FILE) {
   try {
     await fs.access(filePath);
   } catch {
+    // Create data directory if it doesn't exist
+    const dir = path.dirname(filePath);
+    await fs.mkdir(dir, { recursive: true });
+    // Create the file
     await fs.writeFile(filePath, JSON.stringify({ people: [], history: [] }, null, 2));
   }
 }

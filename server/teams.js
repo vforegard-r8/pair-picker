@@ -9,6 +9,10 @@ async function ensureTeamsFile() {
   try {
     await fs.access(TEAMS_FILE);
   } catch {
+    // Create data directory if it doesn't exist
+    const dir = path.dirname(TEAMS_FILE);
+    await fs.mkdir(dir, { recursive: true });
+    // Create the file
     await fs.writeFile(TEAMS_FILE, JSON.stringify({ teams: {} }, null, 2));
   }
 }
