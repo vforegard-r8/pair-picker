@@ -173,8 +173,15 @@ app.post('/auth/team-login', async (req, res) => {
         console.error('[AUTH] Login error:', err);
         return res.status(500).json({ error: 'Login failed' });
       }
-      console.log('[AUTH] Team created and logged in:', result.team);
-      res.json({ success: true, user, created: true });
+      // Save session before responding
+      req.session.save((saveErr) => {
+        if (saveErr) {
+          console.error('[AUTH] Session save error:', saveErr);
+          return res.status(500).json({ error: 'Session save failed' });
+        }
+        console.log('[AUTH] Team created and logged in:', result.team);
+        res.json({ success: true, user, created: true });
+      });
     });
   }
   // Login to existing team
@@ -197,9 +204,18 @@ app.post('/auth/team-login', async (req, res) => {
 
     req.login(user, (err) => {
       if (err) {
+        console.error('[AUTH] Login error:', err);
         return res.status(500).json({ error: 'Login failed' });
       }
-      res.json({ success: true, user });
+      // Save session before responding
+      req.session.save((saveErr) => {
+        if (saveErr) {
+          console.error('[AUTH] Session save error:', saveErr);
+          return res.status(500).json({ error: 'Session save failed' });
+        }
+        console.log('[AUTH] User logged in:', user.team);
+        res.json({ success: true, user });
+      });
     });
   }
 });
