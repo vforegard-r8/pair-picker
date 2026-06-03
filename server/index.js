@@ -38,33 +38,47 @@ app.use(bodyParser.json());
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/pair-picker';
 
 // Session middleware - must be set up before routes
-// Session store creates its own MongoDB connection for reliability
-app.use(session({
+// Using memory store temporarily to verify login logic works
+const sessionConfig = {
   secret: authConfig.sessionSecret,
   resave: false,
   saveUninitialized: false,
-  proxy: true, // Required when behind Render's proxy
-  store: MongoStore.create({
-    mongoUrl: MONGODB_URI,
-    dbName: 'pair-picker',
-    collectionName: 'sessions',
-    touchAfter: 24 * 3600, // lazy session update (seconds)
-    crypto: {
-      secret: authConfig.sessionSecret
-    },
-    mongoOptions: {
-      serverSelectionTimeoutMS: 10000,
-      socketTimeoutMS: 45000,
-    }
-  }),
+  proxy: true,
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    sameSite: 'lax', // Use lax for same-site requests
+    maxAge: 24 * 60 * 60 * 1000,
+    sameSite: 'lax',
     path: '/'
   }
-}));
+};
+
+// Try to use MongoDB store, fall back to memory store if it fails
+try {
+  const store = MongoStore.create({
+    mongoUrl: MONGODB_URI,
+    touchAfter: 24 * 3600
+  });
+
+  store.on('error', (error) => {
+    console.error('[SESSION] MongoStore error:', error);
+  });
+
+  store.on('create', () => {
+    console.log('[SESSION] Session created in MongoDB');
+  });
+
+  store.on('set', () => {
+    console.log('[SESSION] Session updated in MongoDB');
+  });
+
+  sessionConfig.store = store;
+  console.log('[SESSION] Using MongoDB session store');
+} catch (error) {
+  console.error('[SESSION] Failed to create MongoDB store, using memory store:', error);
+}
+
+app.use(session(sessionConfig));
 
 // Initialize passport
 app.use(passport.initialize());
@@ -211,15 +225,8 @@ function setupRoutes() {
         console.error('[AUTH] Login error:', err);
         return res.status(500).json({ error: 'Login failed' });
       }
-      // Save session before responding
-      req.session.save((saveErr) => {
-        if (saveErr) {
-          console.error('[AUTH] Session save error:', saveErr);
-          return res.status(500).json({ error: 'Session save failed' });
-        }
-        console.log('[AUTH] Team created and logged in:', result.team);
-        res.json({ success: true, user, created: true });
-      });
+      console.log('[AUTH] Team created and logged in:', result.team);
+      res.json({ success: true, user, created: true });
     });
   }
   // Login to existing team
@@ -245,15 +252,8 @@ function setupRoutes() {
         console.error('[AUTH] Login error:', err);
         return res.status(500).json({ error: 'Login failed' });
       }
-      // Save session before responding
-      req.session.save((saveErr) => {
-        if (saveErr) {
-          console.error('[AUTH] Session save error:', saveErr);
-          return res.status(500).json({ error: 'Session save failed' });
-        }
-        console.log('[AUTH] User logged in:', user.team);
-        res.json({ success: true, user });
-      });
+      console.log('[AUTH] User logged in:', user.team);
+      res.json({ success: true, user });
     });
     }
   });
