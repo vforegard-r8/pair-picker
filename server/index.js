@@ -2,12 +2,13 @@ const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const session = require('express-session');
+const MongoStore = require('connect-mongo');
 const passport = require('passport');
-const fs = require('fs').promises;
 const path = require('path');
+const { connect, getDb } = require('./db');
 const { setupPassport, ensureAuthenticated } = require('./auth');
 const authConfig = require('./auth-config');
-const { ensureTeamsFile, teamExists, createTeam, verifyTeam, sanitizeTeamName, getTeamDataFile } = require('./teams');
+const { ensureTeamsCollection, teamExists, createTeam, verifyTeam, sanitizeTeamName, getTeamCollection } = require('./teams');
 
 const app = express();
 
@@ -15,14 +16,13 @@ const app = express();
 app.set('trust proxy', 1);
 
 const PORT = process.env.PORT || 3001;
-const DATA_FILE = path.join(__dirname, '../data/pairs-history.json');
 
-// Get data file based on auth mode
-function getDataFile(req) {
+// Get collection name based on auth mode
+function getDataCollection(req) {
   if (authConfig.multiTeam.enabled && req.user && req.user.team) {
-    return getTeamDataFile(req.user.team);
+    return getTeamCollection(req.user.team);
   }
-  return DATA_FILE;
+  return 'default_team_data';
 }
 
 // CORS configuration (only needed in development)
@@ -34,12 +34,21 @@ if (process.env.NODE_ENV !== 'production') {
 }
 app.use(bodyParser.json());
 
-// Session configuration
+// Session configuration with MongoDB store
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/pair-picker';
+
 app.use(session({
   secret: authConfig.sessionSecret,
   resave: false,
   saveUninitialized: false,
   proxy: true, // Required when behind Render's proxy
+  store: MongoStore.create({
+    mongoUrl: MONGODB_URI,
+    touchAfter: 24 * 3600, // lazy session update (seconds)
+    crypto: {
+      secret: authConfig.sessionSecret
+    }
+  }),
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
@@ -54,33 +63,46 @@ app.use(passport.initialize());
 app.use(passport.session());
 setupPassport();
 
-// Ensure data directory and file exist
-async function ensureDataFile(filePath = DATA_FILE) {
+// Read data from MongoDB
+async function readData(collectionName) {
   try {
-    await fs.access(filePath);
-  } catch {
-    // Create data directory if it doesn't exist
-    const dir = path.dirname(filePath);
-    await fs.mkdir(dir, { recursive: true });
-    // Create the file
-    await fs.writeFile(filePath, JSON.stringify({ people: [], history: [] }, null, 2));
-  }
-}
+    const db = await getDb();
+    const doc = await db.collection(collectionName).findOne({ _id: 'team_data' });
 
-// Read data
-async function readData(filePath = DATA_FILE) {
-  try {
-    await ensureDataFile(filePath);
-    const data = await fs.readFile(filePath, 'utf8');
-    return JSON.parse(data);
+    if (!doc) {
+      // Return default structure if no data exists
+      return { people: [], history: [] };
+    }
+
+    return {
+      people: doc.people || [],
+      history: doc.history || []
+    };
   } catch (error) {
+    console.error('[DATA] Error reading data:', error);
     return { people: [], history: [] };
   }
 }
 
-// Write data
-async function writeData(data, filePath = DATA_FILE) {
-  await fs.writeFile(filePath, JSON.stringify(data, null, 2));
+// Write data to MongoDB
+async function writeData(data, collectionName) {
+  try {
+    const db = await getDb();
+    await db.collection(collectionName).updateOne(
+      { _id: 'team_data' },
+      {
+        $set: {
+          people: data.people || [],
+          history: data.history || [],
+          updatedAt: new Date()
+        }
+      },
+      { upsert: true }
+    );
+  } catch (error) {
+    console.error('[DATA] Error writing data:', error);
+    throw error;
+  }
 }
 
 // Smart pairing algorithm
@@ -255,37 +277,37 @@ app.get('/auth/config', (req, res) => {
 
 // API Routes (Protected)
 app.get('/api/people', ensureAuthenticated, async (req, res) => {
-  const dataFile = getDataFile(req);
-  const data = await readData(dataFile);
+  const collection = getDataCollection(req);
+  const data = await readData(collection);
   res.json(data.people);
 });
 
 app.post('/api/people', ensureAuthenticated, async (req, res) => {
   const { people } = req.body;
-  const dataFile = getDataFile(req);
-  const data = await readData(dataFile);
+  const collection = getDataCollection(req);
+  const data = await readData(collection);
   data.people = people;
-  await writeData(data, dataFile);
+  await writeData(data, collection);
   res.json({ success: true });
 });
 
 app.get('/api/history', ensureAuthenticated, async (req, res) => {
-  const dataFile = getDataFile(req);
-  const data = await readData(dataFile);
+  const collection = getDataCollection(req);
+  const data = await readData(collection);
   res.json(data.history);
 });
 
 app.post('/api/pairs/smart', ensureAuthenticated, async (req, res) => {
-  const dataFile = getDataFile(req);
-  const data = await readData(dataFile);
+  const collection = getDataCollection(req);
+  const data = await readData(collection);
   const pairs = smartPair(data.people, data.history);
   res.json(pairs);
 });
 
 app.post('/api/pairs/save', ensureAuthenticated, async (req, res) => {
   const { pairs } = req.body;
-  const dataFile = getDataFile(req);
-  const data = await readData(dataFile);
+  const collection = getDataCollection(req);
+  const data = await readData(collection);
 
   const session = {
     id: Date.now(),
@@ -294,16 +316,16 @@ app.post('/api/pairs/save', ensureAuthenticated, async (req, res) => {
   };
 
   data.history.push(session);
-  await writeData(data, dataFile);
+  await writeData(data, collection);
   res.json({ success: true, session });
 });
 
 app.delete('/api/history/:id', ensureAuthenticated, async (req, res) => {
   const { id } = req.params;
-  const dataFile = getDataFile(req);
-  const data = await readData(dataFile);
+  const collection = getDataCollection(req);
+  const data = await readData(collection);
   data.history = data.history.filter(session => session.id !== parseInt(id));
-  await writeData(data, dataFile);
+  await writeData(data, collection);
   res.json({ success: true });
 });
 
@@ -319,14 +341,26 @@ if (process.env.NODE_ENV === 'production') {
 
 // Initialize and start server
 async function initialize() {
-  await ensureDataFile();
-  if (authConfig.multiTeam.enabled) {
-    await ensureTeamsFile();
+  try {
+    // Connect to MongoDB
+    await connect();
+    console.log('[INIT] MongoDB connection established');
+
+    // Initialize teams collection if multi-team is enabled
+    if (authConfig.multiTeam.enabled) {
+      await ensureTeamsCollection();
+      console.log('[INIT] Teams collection initialized');
+    }
+
+    app.listen(PORT, () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+      console.log(`Multi-team mode: ${authConfig.multiTeam.enabled ? 'ENABLED' : 'disabled'}`);
+      console.log(`MongoDB: ${process.env.MONGODB_URI ? 'Connected' : 'Using default localhost'}`);
+    });
+  } catch (error) {
+    console.error('[INIT] Failed to initialize server:', error);
+    process.exit(1);
   }
-  app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    console.log(`Multi-team mode: ${authConfig.multiTeam.enabled ? 'ENABLED' : 'disabled'}`);
-  });
 }
 
 initialize();
