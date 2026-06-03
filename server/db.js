@@ -44,7 +44,14 @@ async function connect() {
 
 function getClientPromise() {
   if (!clientPromise) {
-    clientPromise = connect().then(() => client);
+    clientPromise = (async () => {
+      await connect();
+      console.log('[DB] clientPromise resolved, client exists:', !!client);
+      if (!client) {
+        throw new Error('MongoDB client is null after connection');
+      }
+      return client;
+    })();
   }
   return clientPromise;
 }

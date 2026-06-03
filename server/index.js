@@ -34,19 +34,27 @@ if (process.env.NODE_ENV !== 'production') {
 }
 app.use(bodyParser.json());
 
+// Get MongoDB URI
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/pair-picker';
+
 // Session middleware - must be set up before routes
-// Uses clientPromise to share MongoDB connection with application
+// Session store creates its own MongoDB connection for reliability
 app.use(session({
   secret: authConfig.sessionSecret,
   resave: false,
   saveUninitialized: false,
   proxy: true, // Required when behind Render's proxy
   store: MongoStore.create({
-    clientPromise: getClientPromise(),
+    mongoUrl: MONGODB_URI,
+    dbName: 'pair-picker',
     collectionName: 'sessions',
     touchAfter: 24 * 3600, // lazy session update (seconds)
     crypto: {
       secret: authConfig.sessionSecret
+    },
+    mongoOptions: {
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 45000,
     }
   }),
   cookie: {
@@ -345,10 +353,10 @@ function setupRoutes() {
 // Initialize and start server
 async function initialize() {
   try {
-    // Connect to MongoDB first - this resolves the clientPromise for the session store
+    // Connect to MongoDB first
     await connect();
-    console.log('[INIT] MongoDB connection established');
-    console.log('[SESSION] Session store shares MongoDB client via clientPromise');
+    console.log('[INIT] MongoDB connection established for application');
+    console.log('[SESSION] Session store uses separate MongoDB connection');
 
     // Initialize teams collection if multi-team is enabled
     if (authConfig.multiTeam.enabled) {
@@ -363,7 +371,7 @@ async function initialize() {
     app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
       console.log(`Multi-team mode: ${authConfig.multiTeam.enabled ? 'ENABLED' : 'disabled'}`);
-      console.log(`MongoDB: ${process.env.MONGODB_URI ? 'Connected' : 'Using default localhost'}`);
+      console.log(`MongoDB URI: ${MONGODB_URI.replace(/\/\/.*:.*@/, '//***:***@')}`);
     });
   } catch (error) {
     console.error('[INIT] Failed to initialize server:', error);
