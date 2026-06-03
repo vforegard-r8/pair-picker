@@ -13,7 +13,14 @@ async function connect() {
 
   try {
     console.log('[DB] Connecting to MongoDB...');
-    client = new MongoClient(MONGODB_URI);
+
+    // MongoDB client options for Node.js compatibility
+    const options = {
+      serverSelectionTimeoutMS: 5000,
+      connectTimeoutMS: 10000
+    };
+
+    client = new MongoClient(MONGODB_URI, options);
     await client.connect();
 
     // Extract database name from URI or use default
