@@ -5,7 +5,7 @@ const session = require('express-session');
 const MongoStore = require('connect-mongo');
 const passport = require('passport');
 const path = require('path');
-const { connect, getDb } = require('./db');
+const { connect, getDb, getClient } = require('./db');
 const { setupPassport, ensureAuthenticated } = require('./auth');
 const authConfig = require('./auth-config');
 const { ensureTeamsCollection, teamExists, createTeam, verifyTeam, sanitizeTeamName, getTeamCollection } = require('./teams');
@@ -34,34 +34,43 @@ if (process.env.NODE_ENV !== 'production') {
 }
 app.use(bodyParser.json());
 
-// Session configuration with MongoDB store
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/pair-picker';
+// Session middleware will be initialized after MongoDB connection
+// This ensures the session store uses the same MongoDB client as the app
+let sessionMiddleware = null;
 
-app.use(session({
-  secret: authConfig.sessionSecret,
-  resave: false,
-  saveUninitialized: false,
-  proxy: true, // Required when behind Render's proxy
-  store: MongoStore.create({
-    mongoUrl: MONGODB_URI,
-    touchAfter: 24 * 3600, // lazy session update (seconds)
-    crypto: {
-      secret: authConfig.sessionSecret
+async function initializeSessionStore() {
+  const client = await getClient();
+
+  sessionMiddleware = session({
+    secret: authConfig.sessionSecret,
+    resave: false,
+    saveUninitialized: false,
+    proxy: true, // Required when behind Render's proxy
+    store: MongoStore.create({
+      client: client, // Use shared MongoDB client
+      touchAfter: 24 * 3600, // lazy session update (seconds)
+      crypto: {
+        secret: authConfig.sessionSecret
+      }
+    }),
+    cookie: {
+      secure: process.env.NODE_ENV === 'production',
+      httpOnly: true,
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      sameSite: 'lax', // Use lax for same-site requests
+      path: '/'
     }
-  }),
-  cookie: {
-    secure: process.env.NODE_ENV === 'production',
-    httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    sameSite: 'lax', // Use lax for same-site requests
-    path: '/'
-  }
-}));
+  });
 
-// Initialize passport
-app.use(passport.initialize());
-app.use(passport.session());
-setupPassport();
+  app.use(sessionMiddleware);
+
+  // Initialize passport after session middleware
+  app.use(passport.initialize());
+  app.use(passport.session());
+  setupPassport();
+
+  console.log('[SESSION] Session store initialized with shared MongoDB client');
+}
 
 // Read data from MongoDB
 async function readData(collectionName) {
@@ -345,6 +354,9 @@ async function initialize() {
     // Connect to MongoDB
     await connect();
     console.log('[INIT] MongoDB connection established');
+
+    // Initialize session store with shared MongoDB client
+    await initializeSessionStore();
 
     // Initialize teams collection if multi-team is enabled
     if (authConfig.multiTeam.enabled) {

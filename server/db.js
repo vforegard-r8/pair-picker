@@ -46,6 +46,13 @@ async function getDb() {
   return db;
 }
 
+async function getClient() {
+  if (!client) {
+    await connect();
+  }
+  return client;
+}
+
 async function closeConnection() {
   if (client) {
     await client.close();
@@ -64,5 +71,6 @@ process.on('SIGINT', async () => {
 module.exports = {
   connect,
   getDb,
+  getClient,
   closeConnection
 };
