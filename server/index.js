@@ -163,10 +163,12 @@ function smartPair(people, history) {
   return result;
 }
 
-// Authentication Routes
+// Setup routes after middleware is initialized
+function setupRoutes() {
+  // Authentication Routes
 
-// Multi-team login or create
-app.post('/auth/team-login', async (req, res) => {
+  // Multi-team login or create
+  app.post('/auth/team-login', async (req, res) => {
   console.log('[AUTH] Team login attempt:', { teamName: req.body.teamName, createNew: req.body.createNew });
   const { teamName, password, createNew } = req.body;
 
@@ -255,98 +257,99 @@ app.post('/auth/team-login', async (req, res) => {
         res.json({ success: true, user });
       });
     });
-  }
-});
-
-
-app.get('/auth/logout', (req, res) => {
-  req.logout((err) => {
-    if (err) {
-      return res.status(500).json({ error: 'Logout failed' });
     }
+  });
+
+
+  app.get('/auth/logout', (req, res) => {
+    req.logout((err) => {
+      if (err) {
+        return res.status(500).json({ error: 'Logout failed' });
+      }
+      res.json({ success: true });
+    });
+  });
+
+  app.get('/auth/user', (req, res) => {
+    console.log('[AUTH] Check user, authenticated:', req.isAuthenticated(), 'session:', !!req.session);
+    if (req.isAuthenticated()) {
+      console.log('[AUTH] User:', req.user);
+      res.json({ user: req.user });
+    } else {
+      console.log('[AUTH] No user logged in');
+      res.json({ user: null });
+    }
+  });
+
+  app.get('/auth/config', (req, res) => {
+    res.json({
+      multiTeamEnabled: authConfig.multiTeam.enabled
+    });
+  });
+
+  // API Routes (Protected)
+  app.get('/api/people', ensureAuthenticated, async (req, res) => {
+    const collection = getDataCollection(req);
+    const data = await readData(collection);
+    res.json(data.people);
+  });
+
+  app.post('/api/people', ensureAuthenticated, async (req, res) => {
+    const { people } = req.body;
+    const collection = getDataCollection(req);
+    const data = await readData(collection);
+    data.people = people;
+    await writeData(data, collection);
     res.json({ success: true });
   });
-});
 
-app.get('/auth/user', (req, res) => {
-  console.log('[AUTH] Check user, authenticated:', req.isAuthenticated(), 'session:', !!req.session);
-  if (req.isAuthenticated()) {
-    console.log('[AUTH] User:', req.user);
-    res.json({ user: req.user });
-  } else {
-    console.log('[AUTH] No user logged in');
-    res.json({ user: null });
+  app.get('/api/history', ensureAuthenticated, async (req, res) => {
+    const collection = getDataCollection(req);
+    const data = await readData(collection);
+    res.json(data.history);
+  });
+
+  app.post('/api/pairs/smart', ensureAuthenticated, async (req, res) => {
+    const collection = getDataCollection(req);
+    const data = await readData(collection);
+    const pairs = smartPair(data.people, data.history);
+    res.json(pairs);
+  });
+
+  app.post('/api/pairs/save', ensureAuthenticated, async (req, res) => {
+    const { pairs } = req.body;
+    const collection = getDataCollection(req);
+    const data = await readData(collection);
+
+    const session = {
+      id: Date.now(),
+      date: new Date().toISOString(),
+      pairs: pairs
+    };
+
+    data.history.push(session);
+    await writeData(data, collection);
+    res.json({ success: true, session });
+  });
+
+  app.delete('/api/history/:id', ensureAuthenticated, async (req, res) => {
+    const { id } = req.params;
+    const collection = getDataCollection(req);
+    const data = await readData(collection);
+    data.history = data.history.filter(session => session.id !== parseInt(id));
+    await writeData(data, collection);
+    res.json({ success: true });
+  });
+
+  // Serve static files in production
+  if (process.env.NODE_ENV === 'production') {
+    app.use(express.static(path.join(__dirname, '../client/build')));
+
+    // Catch-all route to serve React app
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(__dirname, '../client/build/index.html'));
+    });
   }
-});
-
-app.get('/auth/config', (req, res) => {
-  res.json({
-    multiTeamEnabled: authConfig.multiTeam.enabled
-  });
-});
-
-// API Routes (Protected)
-app.get('/api/people', ensureAuthenticated, async (req, res) => {
-  const collection = getDataCollection(req);
-  const data = await readData(collection);
-  res.json(data.people);
-});
-
-app.post('/api/people', ensureAuthenticated, async (req, res) => {
-  const { people } = req.body;
-  const collection = getDataCollection(req);
-  const data = await readData(collection);
-  data.people = people;
-  await writeData(data, collection);
-  res.json({ success: true });
-});
-
-app.get('/api/history', ensureAuthenticated, async (req, res) => {
-  const collection = getDataCollection(req);
-  const data = await readData(collection);
-  res.json(data.history);
-});
-
-app.post('/api/pairs/smart', ensureAuthenticated, async (req, res) => {
-  const collection = getDataCollection(req);
-  const data = await readData(collection);
-  const pairs = smartPair(data.people, data.history);
-  res.json(pairs);
-});
-
-app.post('/api/pairs/save', ensureAuthenticated, async (req, res) => {
-  const { pairs } = req.body;
-  const collection = getDataCollection(req);
-  const data = await readData(collection);
-
-  const session = {
-    id: Date.now(),
-    date: new Date().toISOString(),
-    pairs: pairs
-  };
-
-  data.history.push(session);
-  await writeData(data, collection);
-  res.json({ success: true, session });
-});
-
-app.delete('/api/history/:id', ensureAuthenticated, async (req, res) => {
-  const { id } = req.params;
-  const collection = getDataCollection(req);
-  const data = await readData(collection);
-  data.history = data.history.filter(session => session.id !== parseInt(id));
-  await writeData(data, collection);
-  res.json({ success: true });
-});
-
-// Serve static files in production
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '../client/build')));
-
-  // Catch-all route to serve React app
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../client/build/index.html'));
-  });
 }
 
 // Initialize and start server
@@ -365,6 +368,10 @@ async function initialize() {
       await ensureTeamsCollection();
       console.log('[INIT] Teams collection initialized');
     }
+
+    // Setup routes after session/passport middleware is ready
+    setupRoutes();
+    console.log('[INIT] Routes initialized');
 
     app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
