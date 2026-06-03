@@ -34,44 +34,36 @@ if (process.env.NODE_ENV !== 'production') {
 }
 app.use(bodyParser.json());
 
-// Placeholder for session initialization
-// Will be set up after MongoDB connection is established
-let sessionInitialized = false;
+// MongoDB URI for session store
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/pair-picker';
 
-function initializeSessionMiddleware(client) {
-  if (sessionInitialized) {
-    return;
-  }
-
-  app.use(session({
-    secret: authConfig.sessionSecret,
-    resave: false,
-    saveUninitialized: false,
-    proxy: true, // Required when behind Render's proxy
-    store: MongoStore.create({
-      client: client, // Use connected MongoDB client
-      touchAfter: 24 * 3600, // lazy session update (seconds)
-      crypto: {
-        secret: authConfig.sessionSecret
-      }
-    }),
-    cookie: {
-      secure: process.env.NODE_ENV === 'production',
-      httpOnly: true,
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
-      sameSite: 'lax', // Use lax for same-site requests
-      path: '/'
+// Session middleware - must be set up before routes
+app.use(session({
+  secret: authConfig.sessionSecret,
+  resave: false,
+  saveUninitialized: false,
+  proxy: true, // Required when behind Render's proxy
+  store: MongoStore.create({
+    mongoUrl: MONGODB_URI,
+    collectionName: 'sessions',
+    touchAfter: 24 * 3600, // lazy session update (seconds)
+    crypto: {
+      secret: authConfig.sessionSecret
     }
-  }));
+  }),
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    sameSite: 'lax', // Use lax for same-site requests
+    path: '/'
+  }
+}));
 
-  // Initialize passport after session middleware
-  app.use(passport.initialize());
-  app.use(passport.session());
-  setupPassport();
-
-  sessionInitialized = true;
-  console.log('[SESSION] Session store initialized with MongoDB client');
-}
+// Initialize passport
+app.use(passport.initialize());
+app.use(passport.session());
+setupPassport();
 
 // Read data from MongoDB
 async function readData(collectionName) {
@@ -358,10 +350,7 @@ async function initialize() {
     // Connect to MongoDB first
     await connect();
     console.log('[INIT] MongoDB connection established');
-
-    // Get the connected client and initialize session store
-    const client = await getClient();
-    initializeSessionMiddleware(client);
+    console.log('[SESSION] Session store using separate MongoDB connection');
 
     // Initialize teams collection if multi-team is enabled
     if (authConfig.multiTeam.enabled) {
