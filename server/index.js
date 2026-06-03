@@ -34,34 +34,44 @@ if (process.env.NODE_ENV !== 'production') {
 }
 app.use(bodyParser.json());
 
-// Session configuration with MongoDB store using clientPromise
-// This allows the session middleware to be set up immediately while
-// the MongoDB connection is established asynchronously
-app.use(session({
-  secret: authConfig.sessionSecret,
-  resave: false,
-  saveUninitialized: false,
-  proxy: true, // Required when behind Render's proxy
-  store: MongoStore.create({
-    clientPromise: getClient(), // Use promise that resolves to shared MongoDB client
-    touchAfter: 24 * 3600, // lazy session update (seconds)
-    crypto: {
-      secret: authConfig.sessionSecret
-    }
-  }),
-  cookie: {
-    secure: process.env.NODE_ENV === 'production',
-    httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    sameSite: 'lax', // Use lax for same-site requests
-    path: '/'
-  }
-}));
+// Placeholder for session initialization
+// Will be set up after MongoDB connection is established
+let sessionInitialized = false;
 
-// Initialize passport
-app.use(passport.initialize());
-app.use(passport.session());
-setupPassport();
+function initializeSessionMiddleware(client) {
+  if (sessionInitialized) {
+    return;
+  }
+
+  app.use(session({
+    secret: authConfig.sessionSecret,
+    resave: false,
+    saveUninitialized: false,
+    proxy: true, // Required when behind Render's proxy
+    store: MongoStore.create({
+      client: client, // Use connected MongoDB client
+      touchAfter: 24 * 3600, // lazy session update (seconds)
+      crypto: {
+        secret: authConfig.sessionSecret
+      }
+    }),
+    cookie: {
+      secure: process.env.NODE_ENV === 'production',
+      httpOnly: true,
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      sameSite: 'lax', // Use lax for same-site requests
+      path: '/'
+    }
+  }));
+
+  // Initialize passport after session middleware
+  app.use(passport.initialize());
+  app.use(passport.session());
+  setupPassport();
+
+  sessionInitialized = true;
+  console.log('[SESSION] Session store initialized with MongoDB client');
+}
 
 // Read data from MongoDB
 async function readData(collectionName) {
@@ -342,10 +352,13 @@ if (process.env.NODE_ENV === 'production') {
 // Initialize and start server
 async function initialize() {
   try {
-    // Connect to MongoDB
+    // Connect to MongoDB first
     await connect();
     console.log('[INIT] MongoDB connection established');
-    console.log('[SESSION] Session store will use shared MongoDB client');
+
+    // Get the connected client and initialize session store
+    const client = await getClient();
+    initializeSessionMiddleware(client);
 
     // Initialize teams collection if multi-team is enabled
     if (authConfig.multiTeam.enabled) {
