@@ -5,7 +5,7 @@ const session = require('express-session');
 const MongoStore = require('connect-mongo');
 const passport = require('passport');
 const path = require('path');
-const { connect, getDb, getClient } = require('./db');
+const { connect, getDb, getClient, getClientPromise } = require('./db');
 const { setupPassport, ensureAuthenticated } = require('./auth');
 const authConfig = require('./auth-config');
 const { ensureTeamsCollection, teamExists, createTeam, verifyTeam, sanitizeTeamName, getTeamCollection } = require('./teams');
@@ -34,17 +34,15 @@ if (process.env.NODE_ENV !== 'production') {
 }
 app.use(bodyParser.json());
 
-// MongoDB URI for session store
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/pair-picker';
-
 // Session middleware - must be set up before routes
+// Uses clientPromise to share MongoDB connection with application
 app.use(session({
   secret: authConfig.sessionSecret,
   resave: false,
   saveUninitialized: false,
   proxy: true, // Required when behind Render's proxy
   store: MongoStore.create({
-    mongoUrl: MONGODB_URI,
+    clientPromise: getClientPromise(),
     collectionName: 'sessions',
     touchAfter: 24 * 3600, // lazy session update (seconds)
     crypto: {
@@ -347,10 +345,10 @@ function setupRoutes() {
 // Initialize and start server
 async function initialize() {
   try {
-    // Connect to MongoDB first
+    // Connect to MongoDB first - this resolves the clientPromise for the session store
     await connect();
     console.log('[INIT] MongoDB connection established');
-    console.log('[SESSION] Session store using separate MongoDB connection');
+    console.log('[SESSION] Session store shares MongoDB client via clientPromise');
 
     // Initialize teams collection if multi-team is enabled
     if (authConfig.multiTeam.enabled) {

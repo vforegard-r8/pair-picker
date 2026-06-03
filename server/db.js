@@ -2,6 +2,7 @@ const { MongoClient } = require('mongodb');
 
 let client = null;
 let db = null;
+let clientPromise = null;
 
 // Get MongoDB connection string from environment variable
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/pair-picker';
@@ -13,6 +14,7 @@ async function connect() {
 
   try {
     console.log('[DB] Connecting to MongoDB...');
+    console.log('[DB] MongoDB URI:', MONGODB_URI.replace(/\/\/.*:.*@/, '//***:***@')); // Log URI without credentials
 
     // MongoDB client options for Node.js compatibility
     const options = {
@@ -28,6 +30,7 @@ async function connect() {
     db = client.db(dbName);
 
     console.log('[DB] Connected to MongoDB successfully');
+    console.log('[DB] Database name:', dbName);
 
     // Create indexes for better performance
     await db.collection('teams').createIndex({ team: 1 }, { unique: true });
@@ -37,6 +40,13 @@ async function connect() {
     console.error('[DB] MongoDB connection error:', error);
     throw error;
   }
+}
+
+function getClientPromise() {
+  if (!clientPromise) {
+    clientPromise = connect().then(() => client);
+  }
+  return clientPromise;
 }
 
 async function getDb() {
@@ -72,5 +82,6 @@ module.exports = {
   connect,
   getDb,
   getClient,
+  getClientPromise,
   closeConnection
 };
